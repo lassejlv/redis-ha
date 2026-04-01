@@ -90,7 +90,8 @@ if [[ ! -f "./docker-compose.yml" ]] && [[ ! -f "./scripts/helpers.sh" ]]; then
   git clone "$REPO_URL" redis-ha
   success "Repository cloned."
   echo ""
-  exec redis-ha/setup.sh
+  cd redis-ha
+  exec ./setup.sh
 fi
 
 PROJECT_DIR="$(pwd)"
