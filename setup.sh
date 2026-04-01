@@ -1,32 +1,81 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Colors
+# ─── Colors & Symbols ────────────────────────────────────
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+MAGENTA='\033[0;35m'
 CYAN='\033[0;36m'
+WHITE='\033[1;37m'
 BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
 
-# Repo URL for standalone installer mode
+CHECK="${GREEN}✓${NC}"
+CROSS="${RED}✗${NC}"
+ARROW="${CYAN}›${NC}"
+DOT="${DIM}·${NC}"
+
 REPO_URL="https://github.com/lassejlv/redis-ha.git"
+TOTAL_STEPS=5
 
-# ─── Helpers ──────────────────────────────────────────────
+# ─── UI Helpers ───────────────────────────────────────────
 
-info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
-success() { echo -e "${GREEN}[OK]${NC}   $1"; }
-warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
-error()   { echo -e "${RED}[ERR]${NC}  $1"; }
+info()    { echo -e "  ${BLUE}ℹ${NC}  $1"; }
+success() { echo -e "  ${CHECK}  $1"; }
+warn()    { echo -e "  ${YELLOW}!${NC}  $1"; }
+error()   { echo -e "  ${CROSS}  $1"; }
+
+divider() {
+  echo -e "  ${DIM}$(printf '─%.0s' {1..52})${NC}"
+}
+
+step() {
+  local num="$1" title="$2"
+  echo ""
+  echo -e "  ${BOLD}${WHITE}[$num/$TOTAL_STEPS]${NC} ${BOLD}$title${NC}"
+  divider
+  echo ""
+}
+
+spinner() {
+  local pid=$1 msg="$2"
+  local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+  local i=0
+  while kill -0 "$pid" 2>/dev/null; do
+    echo -en "\r  ${CYAN}${frames[$i]}${NC}  $msg" >&2
+    i=$(( (i + 1) % ${#frames[@]} ))
+    sleep 0.1
+  done
+  wait "$pid" 2>/dev/null
+  local exit_code=$?
+  echo -en "\r\033[K" >&2
+  return $exit_code
+}
+
+run_with_spinner() {
+  local msg="$1"
+  shift
+  "$@" >/dev/null 2>&1 &
+  local pid=$!
+  if spinner "$pid" "$msg"; then
+    success "$msg"
+    return 0
+  else
+    error "$msg — failed"
+    return 1
+  fi
+}
 
 ask() {
   local prompt="$1" default="$2" value
   if [[ -n "$default" ]]; then
-    echo -en "${CYAN}  $prompt ${DIM}[$default]${NC}: " >&2
+    echo -en "  ${ARROW}  ${prompt} ${DIM}[$default]${NC} " >&2
   else
-    echo -en "${CYAN}  $prompt${NC}: " >&2
+    echo -en "  ${ARROW}  ${prompt} " >&2
   fi
   read -r value < /dev/tty
   echo "${value:-$default}"
@@ -35,26 +84,26 @@ ask() {
 ask_password() {
   local prompt="$1" pass1 pass2
   while true; do
-    echo -en "${CYAN}  $prompt${NC}: " >&2
+    echo -en "  ${ARROW}  ${prompt} " >&2
     read -rs pass1 < /dev/tty
     echo "" >&2
     if [[ -z "$pass1" ]]; then
       return
     fi
-    echo -en "${CYAN}  Confirm password${NC}: " >&2
+    echo -en "  ${ARROW}  Confirm password " >&2
     read -rs pass2 < /dev/tty
     echo "" >&2
     if [[ "$pass1" == "$pass2" ]]; then
       echo "$pass1"
       return
     fi
-    echo -e "${YELLOW}[WARN]${NC} Passwords do not match. Try again." >&2
+    warn "Passwords do not match. Try again."
   done
 }
 
 ask_yesno() {
   local prompt="$1" default="$2" value
-  echo -en "${CYAN}  $prompt ${DIM}[$default]${NC}: " >&2
+  echo -en "  ${ARROW}  ${prompt} ${DIM}[$default]${NC} " >&2
   read -r value < /dev/tty
   value="${value:-$default}"
   [[ "$value" =~ ^[Yy] ]]
@@ -62,33 +111,51 @@ ask_yesno() {
 
 validate_port() {
   local port="$1"
-  if ! [[ "$port" =~ ^[0-9]+$ ]] || [[ "$port" -lt 1024 ]] || [[ "$port" -gt 65535 ]]; then
-    return 1
+  [[ "$port" =~ ^[0-9]+$ ]] && [[ "$port" -ge 1024 ]] && [[ "$port" -le 65535 ]]
+}
+
+detect_pkg_manager() {
+  if command -v apt-get &>/dev/null; then
+    echo "apt"
+  elif command -v dnf &>/dev/null; then
+    echo "dnf"
+  elif command -v yum &>/dev/null; then
+    echo "yum"
+  elif command -v apk &>/dev/null; then
+    echo "apk"
+  else
+    echo "unknown"
   fi
-  return 0
 }
 
 # ─── Banner ───────────────────────────────────────────────
 
+clear 2>/dev/null || true
 echo ""
-echo -e "${BOLD}${BLUE}"
-echo "  ╦═╗┌─┐┌┬┐┬┌─┐  ╦ ╦╔═╗  ╔═╗┬  ┬ ┬┌─┐┌┬┐┌─┐┬─┐"
-echo "  ╠╦╝├┤  │││└─┐  ╠═╣╠═╣  ║  │  │ │└─┐ │ ├┤ ├┬┘"
-echo "  ╩╚═└─┘─┴┘┴└─┘  ╩ ╩╩ ╩  ╚═╝┴─┘└─┘└─┘ ┴ └─┘┴└─"
+echo -e "${BOLD}${RED}"
+cat << 'BANNER'
+      ██████╗ ███████╗██████╗ ██╗███████╗    ██╗  ██╗ █████╗
+      ██╔══██╗██╔════╝██╔══██╗██║██╔════╝    ██║  ██║██╔══██╗
+      ██████╔╝█████╗  ██║  ██║██║███████╗    ███████║███████║
+      ██╔══██╗██╔══╝  ██║  ██║██║╚════██║    ██╔══██║██╔══██║
+      ██║  ██║███████╗██████╔╝██║███████║    ██║  ██║██║  ██║
+      ╚═╝  ╚═╝╚══════╝╚═════╝ ╚═╝╚══════╝    ╚═╝  ╚═╝╚═╝  ╚═╝
+BANNER
 echo -e "${NC}"
-echo -e "  ${DIM}Interactive setup for Redis HA Cluster with Docker${NC}"
+echo -e "  ${DIM}High-Availability Redis Cluster · Docker · HAProxy · Monitoring${NC}"
+echo -e "  ${DIM}github.com/lassejlv/redis-ha${NC}"
 echo ""
 
 # ─── Standalone installer: clone if not in repo ──────────
 
 if [[ ! -f "./docker-compose.yml" ]] && [[ ! -f "./scripts/helpers.sh" ]]; then
-  info "Not inside the redis-ha project. Cloning repository..."
+  info "Not inside the redis-ha project. Cloning..."
   if ! command -v git &>/dev/null; then
     error "git is not installed. Please install git first."
     exit 1
   fi
-  git clone "$REPO_URL" redis-ha
-  success "Repository cloned."
+  git clone --quiet "$REPO_URL" redis-ha
+  success "Repository cloned into ./redis-ha"
   echo ""
   cd redis-ha
   exec ./setup.sh
@@ -96,88 +163,137 @@ fi
 
 PROJECT_DIR="$(pwd)"
 
-# ─── Step 1: Check Prerequisites ─────────────────────────
+# ═════════════════════════════════════════════════════════
+# Step 1: System & Dependencies
+# ═════════════════════════════════════════════════════════
 
-echo -e "${BOLD}Step 1: Checking prerequisites${NC}"
-echo ""
+step 1 "System & Dependencies"
 
-# Check Docker
+OS="$(uname -s)"
+PKG_MANAGER="unknown"
+
+if [[ "$OS" == "Linux" ]]; then
+  PKG_MANAGER=$(detect_pkg_manager)
+
+  if [[ "$PKG_MANAGER" != "unknown" ]]; then
+    info "Detected package manager: ${BOLD}$PKG_MANAGER${NC}"
+    echo ""
+
+    # Update system packages
+    case "$PKG_MANAGER" in
+      apt)
+        run_with_spinner "Updating package lists" sudo apt-get update -qq || true
+        run_with_spinner "Upgrading system packages" sudo apt-get upgrade -y -qq || true
+        run_with_spinner "Installing dependencies" sudo apt-get install -y -qq curl git ca-certificates gnupg lsb-release || true
+        ;;
+      dnf)
+        run_with_spinner "Updating system packages" sudo dnf update -y --quiet || true
+        run_with_spinner "Installing dependencies" sudo dnf install -y --quiet curl git ca-certificates || true
+        ;;
+      yum)
+        run_with_spinner "Updating system packages" sudo yum update -y --quiet || true
+        run_with_spinner "Installing dependencies" sudo yum install -y --quiet curl git ca-certificates || true
+        ;;
+      apk)
+        run_with_spinner "Updating package lists" apk update --quiet || true
+        run_with_spinner "Installing dependencies" apk add --quiet curl git ca-certificates || true
+        ;;
+    esac
+    echo ""
+  fi
+elif [[ "$OS" == "Darwin" ]]; then
+  info "macOS detected — skipping system package update"
+  echo ""
+fi
+
+# ─── Docker ──────────────────────────────────────────────
+
 if command -v docker &>/dev/null; then
-  DOCKER_VERSION=$(docker --version 2>/dev/null | head -1)
-  success "Docker installed: $DOCKER_VERSION"
+  DOCKER_VERSION=$(docker --version 2>/dev/null | sed 's/Docker version //' | cut -d, -f1)
+  success "Docker ${DIM}v${DOCKER_VERSION}${NC}"
 else
-  warn "Docker is not installed."
-  case "$(uname -s)" in
+  warn "Docker is not installed"
+  echo ""
+
+  case "$OS" in
     Darwin)
       if command -v brew &>/dev/null; then
         if ask_yesno "Install Docker Desktop via Homebrew?" "Y"; then
-          info "Installing Docker Desktop..."
-          brew install --cask docker
-          success "Docker Desktop installed. Please open it from Applications to start the daemon."
-          echo -e "  ${DIM}Then re-run this script.${NC}"
+          run_with_spinner "Installing Docker Desktop" brew install --cask docker
+          echo ""
+          warn "Open Docker Desktop from Applications to start the daemon."
+          warn "Then re-run: ${BOLD}./setup.sh${NC}"
           exit 0
         fi
-      else
-        error "Please install Docker Desktop from: https://www.docker.com/products/docker-desktop/"
-        exit 1
       fi
+      error "Install Docker Desktop: https://docker.com/products/docker-desktop/"
+      exit 1
       ;;
     Linux)
-      if ask_yesno "Install Docker via official install script? (requires sudo)" "Y"; then
-        info "Installing Docker..."
-        curl -fsSL https://get.docker.com | sh
+      if ask_yesno "Install Docker via official script? (requires sudo)" "Y"; then
+        echo ""
+        run_with_spinner "Installing Docker" bash -c 'curl -fsSL https://get.docker.com | sh'
         sudo systemctl enable --now docker 2>/dev/null || true
         sudo usermod -aG docker "$USER" 2>/dev/null || true
-        success "Docker installed."
-        warn "You may need to log out and back in for group changes to take effect."
-        warn "Then re-run this script."
-        exit 0
+
+        # Verify Docker works (may need sudo if group not active yet)
+        if docker info &>/dev/null 2>&1; then
+          success "Docker installed and running"
+        elif sudo docker info &>/dev/null 2>&1; then
+          success "Docker installed (using sudo for this session)"
+          # Alias docker to sudo docker for rest of this script
+          docker() { sudo docker "$@"; }
+          export -f docker 2>/dev/null || true
+        else
+          error "Docker installed but daemon not responding"
+          warn "Try: ${BOLD}sudo systemctl start docker${NC} then re-run this script"
+          exit 1
+        fi
       else
-        error "Please install Docker manually: https://docs.docker.com/engine/install/"
+        error "Docker is required. Install: https://docs.docker.com/engine/install/"
         exit 1
       fi
       ;;
     *)
-      error "Unsupported platform: $(uname -s)"
-      error "Please install Docker manually: https://docs.docker.com/engine/install/"
+      error "Unsupported platform: $OS"
       exit 1
       ;;
   esac
 fi
 
-# Check Docker Compose
+# ─── Docker Compose ──────────────────────────────────────
+
 if docker compose version &>/dev/null; then
-  success "Docker Compose available (plugin)"
+  COMPOSE_VERSION=$(docker compose version --short 2>/dev/null || echo "available")
+  success "Docker Compose ${DIM}v${COMPOSE_VERSION}${NC}"
 elif command -v docker-compose &>/dev/null; then
-  success "Docker Compose available (standalone)"
+  success "Docker Compose ${DIM}(standalone)${NC}"
 else
-  error "Docker Compose is not installed."
-  error "Install it: https://docs.docker.com/compose/install/"
+  error "Docker Compose not found: https://docs.docker.com/compose/install/"
   exit 1
 fi
 
-# Check Docker daemon
+# ─── Docker Daemon ───────────────────────────────────────
+
 if docker info &>/dev/null 2>&1; then
-  success "Docker daemon is running"
+  success "Docker daemon running"
 else
-  warn "Docker daemon is not running."
-  case "$(uname -s)" in
-    Darwin)
-      info "Please open Docker Desktop from your Applications folder."
-      ;;
-    Linux)
-      info "Try: sudo systemctl start docker"
-      ;;
+  echo ""
+  case "$OS" in
+    Darwin) warn "Start Docker Desktop, then re-run this script." ;;
+    Linux)  warn "Run: ${BOLD}sudo systemctl start docker${NC}" ;;
   esac
-  error "Start Docker and re-run this script."
+  error "Docker daemon not responding"
   exit 1
 fi
 
-echo ""
+# ═════════════════════════════════════════════════════════
+# Step 2: Configuration
+# ═════════════════════════════════════════════════════════
 
-# ─── Step 2: Interactive Configuration ───────────────────
+step 2 "Configuration"
 
-echo -e "${BOLD}Step 2: Configuration${NC}"
+echo -e "  ${DIM}Press Enter to accept defaults shown in brackets.${NC}"
 echo ""
 
 # Redis version
@@ -189,189 +305,171 @@ echo -e "  ${DIM}A password is recommended for production use.${NC}"
 echo -e "  ${DIM}Press Enter to skip (no authentication).${NC}"
 REDIS_PASSWORD=$(ask_password "Redis password")
 if [[ -n "$REDIS_PASSWORD" ]]; then
-  success "Password set."
+  success "Password configured"
 else
-  warn "No password set. Cluster will be unauthenticated."
+  warn "No password — cluster will be open"
 fi
 
-# Number of masters
+# Masters
 echo ""
 NUM_MASTERS=$(ask "Number of master nodes (min 3)" "3")
 while ! [[ "$NUM_MASTERS" =~ ^[0-9]+$ ]] || [[ "$NUM_MASTERS" -lt 3 ]]; do
-  warn "Must be a number >= 3"
+  warn "Must be >= 3"
   NUM_MASTERS=$(ask "Number of master nodes (min 3)" "3")
 done
 TOTAL_NODES=$((NUM_MASTERS * 2))
 
-# Max memory
+# Memory
 echo ""
-echo -e "  ${DIM}Examples: 256mb, 1gb, 4gb. Leave empty for no limit.${NC}"
+echo -e "  ${DIM}Examples: 256mb, 1gb, 4gb. Empty = no limit.${NC}"
 REDIS_MAXMEMORY=$(ask "Max memory per node" "")
 
 # HAProxy ports
 echo ""
-echo -e "  ${DIM}HAProxy load balancer ports:${NC}"
-HAPROXY_WRITE_PORT=$(ask "Write endpoint port (masters)" "6380")
+echo -e "  ${BOLD}Load Balancer Ports${NC}"
+HAPROXY_WRITE_PORT=$(ask "Write port (masters)" "6380")
 while ! validate_port "$HAPROXY_WRITE_PORT"; do
-  warn "Invalid port. Must be 1024-65535."
-  HAPROXY_WRITE_PORT=$(ask "Write endpoint port" "6380")
+  warn "Invalid port (1024-65535)"
+  HAPROXY_WRITE_PORT=$(ask "Write port" "6380")
 done
 
-HAPROXY_READ_PORT=$(ask "Read endpoint port (replicas)" "6381")
+HAPROXY_READ_PORT=$(ask "Read port (replicas)" "6381")
 while ! validate_port "$HAPROXY_READ_PORT"; do
-  warn "Invalid port. Must be 1024-65535."
-  HAPROXY_READ_PORT=$(ask "Read endpoint port" "6381")
+  warn "Invalid port (1024-65535)"
+  HAPROXY_READ_PORT=$(ask "Read port" "6381")
 done
 
 HAPROXY_STATS_PORT=$(ask "Stats dashboard port" "8404")
 while ! validate_port "$HAPROXY_STATS_PORT"; do
-  warn "Invalid port. Must be 1024-65535."
+  warn "Invalid port (1024-65535)"
   HAPROXY_STATS_PORT=$(ask "Stats dashboard port" "8404")
 done
 
-# ─── Monitoring (optional) ────────────────────────────────
+# ─── Monitoring ──────────────────────────────────────────
 
 echo ""
-echo -e "${BOLD}Monitoring & Alerts (optional)${NC}"
+echo -e "  ${BOLD}Monitoring & Alerts${NC}"
 echo ""
 
 MONITOR_ENABLED="false"
 MONITOR_INTERVAL="10"
 MONITOR_MEMORY_THRESHOLD="80"
-SMTP_ENABLED="false"
-SMTP_HOST=""
-SMTP_PORT="587"
-SMTP_USERNAME=""
-SMTP_PASSWORD=""
-SMTP_FROM=""
-SMTP_TO=""
-SMTP_TLS="true"
-DISCORD_ENABLED="false"
-DISCORD_WEBHOOK_URL=""
-WEBHOOK_ENABLED="false"
-WEBHOOK_URL=""
-WEBHOOK_HEADERS=""
+SMTP_ENABLED="false"; SMTP_HOST=""; SMTP_PORT="587"; SMTP_USERNAME=""
+SMTP_PASSWORD=""; SMTP_FROM=""; SMTP_TO=""; SMTP_TLS="true"
+DISCORD_ENABLED="false"; DISCORD_WEBHOOK_URL=""
+WEBHOOK_ENABLED="false"; WEBHOOK_URL=""; WEBHOOK_HEADERS=""
 
 if ask_yesno "Enable cluster monitoring?" "N"; then
   MONITOR_ENABLED="true"
-  MONITOR_INTERVAL=$(ask "Check interval in seconds" "10")
+  MONITOR_INTERVAL=$(ask "Check interval (seconds)" "10")
   MONITOR_MEMORY_THRESHOLD=$(ask "Memory alert threshold (%)" "80")
 
   echo ""
-  echo -e "  ${DIM}Configure one or more notification channels:${NC}"
+  echo -e "  ${DIM}Configure notification channels:${NC}"
 
-  # Email
   echo ""
-  if ask_yesno "  Enable email notifications (SMTP)?" "N"; then
+  if ask_yesno "Email (SMTP)?" "N"; then
     SMTP_ENABLED="true"
-    SMTP_HOST=$(ask "  SMTP host" "")
+    SMTP_HOST=$(ask "SMTP host" "")
     while [[ -z "$SMTP_HOST" ]]; do
-      warn "SMTP host is required."
-      SMTP_HOST=$(ask "  SMTP host" "")
+      warn "Required"; SMTP_HOST=$(ask "SMTP host" "")
     done
-    SMTP_PORT=$(ask "  SMTP port" "587")
-    SMTP_USERNAME=$(ask "  SMTP username" "")
-    SMTP_PASSWORD=$(ask_password "  SMTP password")
-    SMTP_FROM=$(ask "  From address" "")
-    SMTP_TO=$(ask "  To address(es, comma-separated)" "")
-    SMTP_TLS=$(ask "  Use TLS? (true/false)" "true")
+    SMTP_PORT=$(ask "SMTP port" "587")
+    SMTP_USERNAME=$(ask "SMTP username" "")
+    SMTP_PASSWORD=$(ask_password "SMTP password")
+    SMTP_FROM=$(ask "From address" "")
+    SMTP_TO=$(ask "To address(es)" "")
+    SMTP_TLS=$(ask "Use TLS?" "true")
   fi
 
-  # Discord
   echo ""
-  if ask_yesno "  Enable Discord notifications?" "N"; then
+  if ask_yesno "Discord webhook?" "N"; then
     DISCORD_ENABLED="true"
-    DISCORD_WEBHOOK_URL=$(ask "  Discord webhook URL" "")
+    DISCORD_WEBHOOK_URL=$(ask "Webhook URL" "")
     while [[ -z "$DISCORD_WEBHOOK_URL" ]]; do
-      warn "Webhook URL is required."
-      DISCORD_WEBHOOK_URL=$(ask "  Discord webhook URL" "")
+      warn "Required"; DISCORD_WEBHOOK_URL=$(ask "Webhook URL" "")
     done
   fi
 
-  # Generic webhook
   echo ""
-  if ask_yesno "  Enable generic webhook notifications?" "N"; then
+  if ask_yesno "Generic POST webhook?" "N"; then
     WEBHOOK_ENABLED="true"
-    WEBHOOK_URL=$(ask "  Webhook URL" "")
+    WEBHOOK_URL=$(ask "Webhook URL" "")
     while [[ -z "$WEBHOOK_URL" ]]; do
-      warn "Webhook URL is required."
-      WEBHOOK_URL=$(ask "  Webhook URL" "")
+      warn "Required"; WEBHOOK_URL=$(ask "Webhook URL" "")
     done
-    WEBHOOK_HEADERS=$(ask "  Custom headers (Header:Value,... or empty)" "")
+    WEBHOOK_HEADERS=$(ask "Custom headers (K:V,K:V or empty)" "")
   fi
 fi
 
-echo ""
+# ═════════════════════════════════════════════════════════
+# Step 3: Review
+# ═════════════════════════════════════════════════════════
 
-# ─── Step 3: Summary ─────────────────────────────────────
+step 3 "Review"
 
-echo -e "${BOLD}Step 3: Review configuration${NC}"
-echo ""
-echo -e "  ┌────────────────────────────────────────────┐"
-echo -e "  │  ${BOLD}Redis HA Cluster Configuration${NC}            │"
-echo -e "  ├────────────────────────────────────────────┤"
-printf "  │  %-18s %-23s │\n" "Redis version:" "$REDIS_VERSION"
-if [[ -n "$REDIS_PASSWORD" ]]; then
-  printf "  │  %-18s %-23s │\n" "Authentication:" "Enabled"
-else
-  printf "  │  %-18s %-23s │\n" "Authentication:" "Disabled"
-fi
-printf "  │  %-18s %-23s │\n" "Masters:" "$NUM_MASTERS"
-printf "  │  %-18s %-23s │\n" "Replicas:" "$NUM_MASTERS"
-printf "  │  %-18s %-23s │\n" "Total nodes:" "$TOTAL_NODES"
-printf "  │  %-18s %-23s │\n" "Max memory:" "${REDIS_MAXMEMORY:-no limit}"
-echo -e "  ├────────────────────────────────────────────┤"
-printf "  │  %-18s %-23s │\n" "Write port:" "$HAPROXY_WRITE_PORT"
-printf "  │  %-18s %-23s │\n" "Read port:" "$HAPROXY_READ_PORT"
-printf "  │  %-18s %-23s │\n" "Stats port:" "$HAPROXY_STATS_PORT"
-printf "  │  %-18s %-23s │\n" "Node ports:" "7001-$((7000 + TOTAL_NODES))"
+AUTH_DISPLAY="Disabled"
+[[ -n "$REDIS_PASSWORD" ]] && AUTH_DISPLAY="Enabled"
+
+MONITOR_DISPLAY="Disabled"
+CHANNELS=""
 if [[ "$MONITOR_ENABLED" == "true" ]]; then
-  echo -e "  ├────────────────────────────────────────────┤"
-  printf "  │  %-18s %-23s │\n" "Monitoring:" "Enabled (${MONITOR_INTERVAL}s)"
-  printf "  │  %-18s %-23s │\n" "Memory threshold:" "${MONITOR_MEMORY_THRESHOLD}%"
-  local_channels=""
-  [[ "$SMTP_ENABLED" == "true" ]] && local_channels="Email "
-  [[ "$DISCORD_ENABLED" == "true" ]] && local_channels="${local_channels}Discord "
-  [[ "$WEBHOOK_ENABLED" == "true" ]] && local_channels="${local_channels}Webhook"
-  printf "  │  %-18s %-23s │\n" "Channels:" "${local_channels:-None}"
+  MONITOR_DISPLAY="Every ${MONITOR_INTERVAL}s"
+  [[ "$SMTP_ENABLED" == "true" ]] && CHANNELS="Email "
+  [[ "$DISCORD_ENABLED" == "true" ]] && CHANNELS="${CHANNELS}Discord "
+  [[ "$WEBHOOK_ENABLED" == "true" ]] && CHANNELS="${CHANNELS}Webhook"
 fi
-echo -e "  └────────────────────────────────────────────┘"
+
+echo -e "  ${BOLD}╔══════════════════════════════════════════════╗${NC}"
+echo -e "  ${BOLD}║         Redis HA Cluster Configuration       ║${NC}"
+echo -e "  ${BOLD}╠══════════════════════════════════════════════╣${NC}"
+printf "  ${BOLD}║${NC}  %-16s ${WHITE}%-26s${NC} ${BOLD}║${NC}\n" "Redis" "v${REDIS_VERSION}"
+printf "  ${BOLD}║${NC}  %-16s ${WHITE}%-26s${NC} ${BOLD}║${NC}\n" "Authentication" "$AUTH_DISPLAY"
+printf "  ${BOLD}║${NC}  %-16s ${WHITE}%-26s${NC} ${BOLD}║${NC}\n" "Topology" "${NUM_MASTERS}m + ${NUM_MASTERS}r = ${TOTAL_NODES} nodes"
+printf "  ${BOLD}║${NC}  %-16s ${WHITE}%-26s${NC} ${BOLD}║${NC}\n" "Max memory" "${REDIS_MAXMEMORY:-unlimited}"
+echo -e "  ${BOLD}╠══════════════════════════════════════════════╣${NC}"
+printf "  ${BOLD}║${NC}  %-16s ${WHITE}%-26s${NC} ${BOLD}║${NC}\n" "Write port" "$HAPROXY_WRITE_PORT"
+printf "  ${BOLD}║${NC}  %-16s ${WHITE}%-26s${NC} ${BOLD}║${NC}\n" "Read port" "$HAPROXY_READ_PORT"
+printf "  ${BOLD}║${NC}  %-16s ${WHITE}%-26s${NC} ${BOLD}║${NC}\n" "Stats port" "$HAPROXY_STATS_PORT"
+printf "  ${BOLD}║${NC}  %-16s ${WHITE}%-26s${NC} ${BOLD}║${NC}\n" "Node ports" "7001-$((7000 + TOTAL_NODES))"
+echo -e "  ${BOLD}╠══════════════════════════════════════════════╣${NC}"
+printf "  ${BOLD}║${NC}  %-16s ${WHITE}%-26s${NC} ${BOLD}║${NC}\n" "Monitoring" "$MONITOR_DISPLAY"
+if [[ -n "$CHANNELS" ]]; then
+  printf "  ${BOLD}║${NC}  %-16s ${WHITE}%-26s${NC} ${BOLD}║${NC}\n" "Channels" "$CHANNELS"
+fi
+echo -e "  ${BOLD}╚══════════════════════════════════════════════╝${NC}"
 echo ""
 
 if ! ask_yesno "Apply this configuration?" "Y"; then
+  echo ""
   info "Aborted."
   exit 0
 fi
 
-echo ""
+# ═════════════════════════════════════════════════════════
+# Step 4: Generate
+# ═════════════════════════════════════════════════════════
 
-# ─── Step 4: Generate Configuration Files ────────────────
+step 4 "Generating Files"
 
-echo -e "${BOLD}Step 4: Generating configuration${NC}"
-echo ""
-
-# Generate .env
+# .env
 cat > "$PROJECT_DIR/.env" <<EOF
 REDIS_VERSION=$REDIS_VERSION
 REDIS_PASSWORD=$REDIS_PASSWORD
 CLUSTER_NODE_TIMEOUT=5000
 REDIS_MAXMEMORY=$REDIS_MAXMEMORY
 
-# HAProxy load balancer ports
 HAPROXY_WRITE_PORT=$HAPROXY_WRITE_PORT
 HAPROXY_READ_PORT=$HAPROXY_READ_PORT
 HAPROXY_STATS_PORT=$HAPROXY_STATS_PORT
 
-# Multi-server (optional)
 MULTI_SERVER=false
 ANNOUNCE_IP=
 
-# Monitoring
 MONITOR_ENABLED=$MONITOR_ENABLED
 MONITOR_INTERVAL=$MONITOR_INTERVAL
 MONITOR_MEMORY_THRESHOLD=$MONITOR_MEMORY_THRESHOLD
 
-# Email (SMTP)
 SMTP_ENABLED=$SMTP_ENABLED
 SMTP_HOST=$SMTP_HOST
 SMTP_PORT=$SMTP_PORT
@@ -381,65 +479,51 @@ SMTP_FROM=$SMTP_FROM
 SMTP_TO=$SMTP_TO
 SMTP_TLS=$SMTP_TLS
 
-# Discord
 DISCORD_ENABLED=$DISCORD_ENABLED
 DISCORD_WEBHOOK_URL=$DISCORD_WEBHOOK_URL
 
-# Generic webhook
 WEBHOOK_ENABLED=$WEBHOOK_ENABLED
 WEBHOOK_URL=$WEBHOOK_URL
 WEBHOOK_HEADERS=$WEBHOOK_HEADERS
 EOF
-success "Generated .env"
+success ".env"
 
-# Generate redis.conf
+# redis.conf
 cat > "$PROJECT_DIR/redis.conf" <<EOF
-# Networking
 port 6379
 bind 0.0.0.0
 protected-mode no
 
-# Cluster
 cluster-enabled yes
 cluster-config-file nodes.conf
 cluster-node-timeout 5000
 cluster-require-full-coverage no
 cluster-allow-reads-when-down yes
 
-# Persistence
 appendonly yes
 appendfilename "appendonly.aof"
 save 900 1
 save 300 10
 save 60 10000
 
-# Memory
 maxmemory-policy allkeys-lru
 EOF
 
-if [[ -n "$REDIS_MAXMEMORY" ]]; then
-  echo "maxmemory $REDIS_MAXMEMORY" >> "$PROJECT_DIR/redis.conf"
-fi
+[[ -n "$REDIS_MAXMEMORY" ]] && echo "maxmemory $REDIS_MAXMEMORY" >> "$PROJECT_DIR/redis.conf"
 
 if [[ -n "$REDIS_PASSWORD" ]]; then
   cat >> "$PROJECT_DIR/redis.conf" <<EOF
 
-# Authentication
 requirepass $REDIS_PASSWORD
 masterauth $REDIS_PASSWORD
 EOF
 fi
 
-echo "
-# Logging
-loglevel notice" >> "$PROJECT_DIR/redis.conf"
+echo -e "\nloglevel notice" >> "$PROJECT_DIR/redis.conf"
+success "redis.conf"
 
-success "Generated redis.conf"
-
-# Generate docker-compose.yml if non-default master count
+# docker-compose.yml (if custom master count)
 if [[ "$NUM_MASTERS" -ne 3 ]]; then
-  info "Generating docker-compose.yml for $TOTAL_NODES nodes..."
-
   cat > "$PROJECT_DIR/docker-compose.yml" <<'ANCHOR'
 x-redis-node: &redis-node
   image: redis:${REDIS_VERSION:-7.4}
@@ -478,7 +562,6 @@ EOF
   for i in $(seq 1 "$TOTAL_NODES"); do
     echo "  redis-data-$i:" >> "$PROJECT_DIR/docker-compose.yml"
   done
-
   cat >> "$PROJECT_DIR/docker-compose.yml" <<'EOF'
 
 networks:
@@ -486,45 +569,40 @@ networks:
     driver: bridge
 EOF
 
-  success "Generated docker-compose.yml ($TOTAL_NODES nodes)"
-
-  # Update start.sh node count reference
-  # The start.sh script uses `seq 1 6` — we need to update the helpers or
-  # make start.sh dynamic. For now, patch the seq range.
   sed -i.bak "s/seq 1 6/seq 1 $TOTAL_NODES/g" "$PROJECT_DIR/scripts/start.sh"
   rm -f "$PROJECT_DIR/scripts/start.sh.bak"
-  success "Updated start.sh for $TOTAL_NODES nodes"
+  success "docker-compose.yml ${DIM}(${TOTAL_NODES} nodes)${NC}"
 else
-  success "Using default docker-compose.yml (6 nodes)"
+  success "docker-compose.yml ${DIM}(default 6 nodes)${NC}"
 fi
 
-echo ""
+# ═════════════════════════════════════════════════════════
+# Step 5: Launch
+# ═════════════════════════════════════════════════════════
 
-# ─── Step 5: Start Cluster ───────────────────────────────
-
-echo -e "${BOLD}Step 5: Launch${NC}"
-echo ""
+step 5 "Launch"
 
 if ask_yesno "Start the cluster now?" "Y"; then
   echo ""
   exec "$PROJECT_DIR/scripts/start.sh"
 else
-  echo ""
   AUTH=""
-  if [[ -n "$REDIS_PASSWORD" ]]; then
-    AUTH=":${REDIS_PASSWORD}@"
-  fi
+  [[ -n "$REDIS_PASSWORD" ]] && AUTH=":${REDIS_PASSWORD}@"
 
-  success "Setup complete! Start the cluster with:"
   echo ""
-  echo -e "  ${BOLD}./scripts/start.sh${NC}"
+  success "Setup complete!"
   echo ""
-  echo -e "  Connection URLs (after start):"
-  echo -e "    Write: ${DIM}redis://${AUTH}localhost:${HAPROXY_WRITE_PORT}${NC}"
-  echo -e "    Read:  ${DIM}redis://${AUTH}localhost:${HAPROXY_READ_PORT}${NC}"
-  echo -e "    Stats: ${DIM}http://localhost:${HAPROXY_STATS_PORT}/stats${NC}"
+  divider
   echo ""
-  echo -e "  ${DIM}./scripts/urls.sh${NC}    — Show all connection URLs"
-  echo -e "  ${DIM}./scripts/status.sh${NC}  — Cluster health"
+  echo -e "  ${BOLD}Start:${NC}   ./scripts/start.sh"
+  echo -e "  ${BOLD}Status:${NC}  ./scripts/status.sh"
+  echo -e "  ${BOLD}URLs:${NC}    ./scripts/urls.sh"
+  echo -e "  ${BOLD}Delete:${NC}  ./scripts/delete.sh"
+  echo ""
+  divider
+  echo ""
+  echo -e "  ${DIM}Write:${NC}  redis://${AUTH}localhost:${HAPROXY_WRITE_PORT}"
+  echo -e "  ${DIM}Read:${NC}   redis://${AUTH}localhost:${HAPROXY_READ_PORT}"
+  echo -e "  ${DIM}Stats:${NC}  http://localhost:${HAPROXY_STATS_PORT}/stats"
   echo ""
 fi
