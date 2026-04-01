@@ -24,9 +24,9 @@ error()   { echo -e "${RED}[ERR]${NC}  $1"; }
 ask() {
   local prompt="$1" default="$2" value
   if [[ -n "$default" ]]; then
-    echo -en "${CYAN}  $prompt ${DIM}[$default]${NC}: "
+    echo -en "${CYAN}  $prompt ${DIM}[$default]${NC}: " >&2
   else
-    echo -en "${CYAN}  $prompt${NC}: "
+    echo -en "${CYAN}  $prompt${NC}: " >&2
   fi
   read -r value < /dev/tty
   echo "${value:-$default}"
@@ -35,27 +35,26 @@ ask() {
 ask_password() {
   local prompt="$1" pass1 pass2
   while true; do
-    echo -en "${CYAN}  $prompt${NC}: "
+    echo -en "${CYAN}  $prompt${NC}: " >&2
     read -rs pass1 < /dev/tty
-    echo ""
+    echo "" >&2
     if [[ -z "$pass1" ]]; then
-      echo ""
       return
     fi
-    echo -en "${CYAN}  Confirm password${NC}: "
+    echo -en "${CYAN}  Confirm password${NC}: " >&2
     read -rs pass2 < /dev/tty
-    echo ""
+    echo "" >&2
     if [[ "$pass1" == "$pass2" ]]; then
       echo "$pass1"
       return
     fi
-    warn "Passwords do not match. Try again."
+    echo -e "${YELLOW}[WARN]${NC} Passwords do not match. Try again." >&2
   done
 }
 
 ask_yesno() {
   local prompt="$1" default="$2" value
-  echo -en "${CYAN}  $prompt ${DIM}[$default]${NC}: "
+  echo -en "${CYAN}  $prompt ${DIM}[$default]${NC}: " >&2
   read -r value < /dev/tty
   value="${value:-$default}"
   [[ "$value" =~ ^[Yy] ]]
@@ -89,9 +88,9 @@ if [[ ! -f "./docker-compose.yml" ]] && [[ ! -f "./scripts/helpers.sh" ]]; then
     exit 1
   fi
   git clone "$REPO_URL" redis-ha
-  cd redis-ha
   success "Repository cloned."
   echo ""
+  exec redis-ha/setup.sh
 fi
 
 PROJECT_DIR="$(pwd)"
