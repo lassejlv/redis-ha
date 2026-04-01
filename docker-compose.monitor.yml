@@ -1,0 +1,34 @@
+services:
+  monitor:
+    build:
+      context: ./monitor
+      dockerfile: Dockerfile
+    container_name: redis-monitor
+    networks:
+      - redis-cluster-net
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - MONITOR_INTERVAL=${MONITOR_INTERVAL:-10}
+      - MONITOR_MEMORY_THRESHOLD=${MONITOR_MEMORY_THRESHOLD:-80}
+      - MONITOR_SEED_NODE=${MONITOR_SEED_NODE:-redis-node-1:6379}
+      - SMTP_ENABLED=${SMTP_ENABLED:-false}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - SMTP_TO=${SMTP_TO:-}
+      - SMTP_TLS=${SMTP_TLS:-true}
+      - DISCORD_ENABLED=${DISCORD_ENABLED:-false}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      - WEBHOOK_ENABLED=${WEBHOOK_ENABLED:-false}
+      - WEBHOOK_URL=${WEBHOOK_URL:-}
+      - WEBHOOK_HEADERS=${WEBHOOK_HEADERS:-}
+    depends_on:
+      redis-node-1:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  redis-cluster-net:
+    external: false

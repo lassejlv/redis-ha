@@ -30,14 +30,23 @@ is_haproxy_enabled() {
   [[ -f "$PROJECT_DIR/docker-compose.lb.yml" ]]
 }
 
+is_monitor_enabled() {
+  [[ "${MONITOR_ENABLED:-false}" == "true" ]] && [[ -f "$PROJECT_DIR/docker-compose.monitor.yml" ]]
+}
+
 compose() {
   local lb_flag=""
   if is_haproxy_enabled; then
     lb_flag="-f $PROJECT_DIR/docker-compose.lb.yml"
   fi
+  local monitor_flag=""
+  if is_monitor_enabled; then
+    monitor_flag="-f $PROJECT_DIR/docker-compose.monitor.yml"
+  fi
   $COMPOSE_CMD -f "$PROJECT_DIR/docker-compose.yml" \
     ${OVERRIDE_FILE:+-f "$OVERRIDE_FILE"} \
     $lb_flag \
+    $monitor_flag \
     "$@"
 }
 

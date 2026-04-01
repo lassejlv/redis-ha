@@ -4,3 +4,4 @@ docker-compose.server-*.yml
 haproxy/haproxy.cfg
 multi-server/servers.conf
 redis.conf
+monitor/target/

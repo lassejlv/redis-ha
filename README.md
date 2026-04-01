@@ -174,6 +174,48 @@ From any machine with network access to all servers:
 ./scripts/multi-server-init.sh
 ```
 
+## Monitoring & Alerts
+
+A Rust-based monitoring daemon runs alongside the cluster and sends notifications when issues are detected.
+
+**What it monitors:**
+- Cluster state (up/down)
+- Node failures and recoveries
+- Failover events (replica promoted to master)
+- Memory usage exceeding threshold
+- Nodes joining or disappearing
+
+**Notification channels:**
+
+| Channel | Config | Description |
+|---|---|---|
+| Email | `SMTP_*` vars | SMTP with TLS support |
+| Discord | `DISCORD_WEBHOOK_URL` | Rich embeds with color-coded severity |
+| Webhook | `WEBHOOK_URL` | Generic POST with JSON payload |
+
+Enable via `./setup.sh` or set `MONITOR_ENABLED=true` in `.env`:
+
+```bash
+MONITOR_ENABLED=true
+MONITOR_INTERVAL=10              # Check every 10 seconds
+MONITOR_MEMORY_THRESHOLD=80      # Alert at 80% memory usage
+
+# Discord example
+DISCORD_ENABLED=true
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+
+# Email example
+SMTP_ENABLED=true
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_FROM=alerts@example.com
+SMTP_TO=team@example.com
+```
+
+The monitor uses **alert deduplication** — it sends one alert per issue and a recovery notification when resolved. No spam.
+
+View monitor logs: `docker logs redis-monitor`
+
 ## Failover Test
 
 ```bash

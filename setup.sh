@@ -28,7 +28,7 @@ ask() {
   else
     echo -en "${CYAN}  $prompt${NC}: "
   fi
-  read -r value
+  read -r value < /dev/tty
   echo "${value:-$default}"
 }
 
@@ -36,14 +36,14 @@ ask_password() {
   local prompt="$1" pass1 pass2
   while true; do
     echo -en "${CYAN}  $prompt${NC}: "
-    read -rs pass1
+    read -rs pass1 < /dev/tty
     echo ""
     if [[ -z "$pass1" ]]; then
       echo ""
       return
     fi
     echo -en "${CYAN}  Confirm password${NC}: "
-    read -rs pass2
+    read -rs pass2 < /dev/tty
     echo ""
     if [[ "$pass1" == "$pass2" ]]; then
       echo "$pass1"
@@ -56,7 +56,7 @@ ask_password() {
 ask_yesno() {
   local prompt="$1" default="$2" value
   echo -en "${CYAN}  $prompt ${DIM}[$default]${NC}: "
-  read -r value
+  read -r value < /dev/tty
   value="${value:-$default}"
   [[ "$value" =~ ^[Yy] ]]
 }
@@ -229,6 +229,78 @@ while ! validate_port "$HAPROXY_STATS_PORT"; do
   HAPROXY_STATS_PORT=$(ask "Stats dashboard port" "8404")
 done
 
+# ─── Monitoring (optional) ────────────────────────────────
+
+echo ""
+echo -e "${BOLD}Monitoring & Alerts (optional)${NC}"
+echo ""
+
+MONITOR_ENABLED="false"
+MONITOR_INTERVAL="10"
+MONITOR_MEMORY_THRESHOLD="80"
+SMTP_ENABLED="false"
+SMTP_HOST=""
+SMTP_PORT="587"
+SMTP_USERNAME=""
+SMTP_PASSWORD=""
+SMTP_FROM=""
+SMTP_TO=""
+SMTP_TLS="true"
+DISCORD_ENABLED="false"
+DISCORD_WEBHOOK_URL=""
+WEBHOOK_ENABLED="false"
+WEBHOOK_URL=""
+WEBHOOK_HEADERS=""
+
+if ask_yesno "Enable cluster monitoring?" "N"; then
+  MONITOR_ENABLED="true"
+  MONITOR_INTERVAL=$(ask "Check interval in seconds" "10")
+  MONITOR_MEMORY_THRESHOLD=$(ask "Memory alert threshold (%)" "80")
+
+  echo ""
+  echo -e "  ${DIM}Configure one or more notification channels:${NC}"
+
+  # Email
+  echo ""
+  if ask_yesno "  Enable email notifications (SMTP)?" "N"; then
+    SMTP_ENABLED="true"
+    SMTP_HOST=$(ask "  SMTP host" "")
+    while [[ -z "$SMTP_HOST" ]]; do
+      warn "SMTP host is required."
+      SMTP_HOST=$(ask "  SMTP host" "")
+    done
+    SMTP_PORT=$(ask "  SMTP port" "587")
+    SMTP_USERNAME=$(ask "  SMTP username" "")
+    SMTP_PASSWORD=$(ask_password "  SMTP password")
+    SMTP_FROM=$(ask "  From address" "")
+    SMTP_TO=$(ask "  To address(es, comma-separated)" "")
+    SMTP_TLS=$(ask "  Use TLS? (true/false)" "true")
+  fi
+
+  # Discord
+  echo ""
+  if ask_yesno "  Enable Discord notifications?" "N"; then
+    DISCORD_ENABLED="true"
+    DISCORD_WEBHOOK_URL=$(ask "  Discord webhook URL" "")
+    while [[ -z "$DISCORD_WEBHOOK_URL" ]]; do
+      warn "Webhook URL is required."
+      DISCORD_WEBHOOK_URL=$(ask "  Discord webhook URL" "")
+    done
+  fi
+
+  # Generic webhook
+  echo ""
+  if ask_yesno "  Enable generic webhook notifications?" "N"; then
+    WEBHOOK_ENABLED="true"
+    WEBHOOK_URL=$(ask "  Webhook URL" "")
+    while [[ -z "$WEBHOOK_URL" ]]; do
+      warn "Webhook URL is required."
+      WEBHOOK_URL=$(ask "  Webhook URL" "")
+    done
+    WEBHOOK_HEADERS=$(ask "  Custom headers (Header:Value,... or empty)" "")
+  fi
+fi
+
 echo ""
 
 # ─── Step 3: Summary ─────────────────────────────────────
@@ -253,6 +325,16 @@ printf "  │  %-18s %-23s │\n" "Write port:" "$HAPROXY_WRITE_PORT"
 printf "  │  %-18s %-23s │\n" "Read port:" "$HAPROXY_READ_PORT"
 printf "  │  %-18s %-23s │\n" "Stats port:" "$HAPROXY_STATS_PORT"
 printf "  │  %-18s %-23s │\n" "Node ports:" "7001-$((7000 + TOTAL_NODES))"
+if [[ "$MONITOR_ENABLED" == "true" ]]; then
+  echo -e "  ├────────────────────────────────────────────┤"
+  printf "  │  %-18s %-23s │\n" "Monitoring:" "Enabled (${MONITOR_INTERVAL}s)"
+  printf "  │  %-18s %-23s │\n" "Memory threshold:" "${MONITOR_MEMORY_THRESHOLD}%"
+  local_channels=""
+  [[ "$SMTP_ENABLED" == "true" ]] && local_channels="Email "
+  [[ "$DISCORD_ENABLED" == "true" ]] && local_channels="${local_channels}Discord "
+  [[ "$WEBHOOK_ENABLED" == "true" ]] && local_channels="${local_channels}Webhook"
+  printf "  │  %-18s %-23s │\n" "Channels:" "${local_channels:-None}"
+fi
 echo -e "  └────────────────────────────────────────────┘"
 echo ""
 
@@ -283,6 +365,30 @@ HAPROXY_STATS_PORT=$HAPROXY_STATS_PORT
 # Multi-server (optional)
 MULTI_SERVER=false
 ANNOUNCE_IP=
+
+# Monitoring
+MONITOR_ENABLED=$MONITOR_ENABLED
+MONITOR_INTERVAL=$MONITOR_INTERVAL
+MONITOR_MEMORY_THRESHOLD=$MONITOR_MEMORY_THRESHOLD
+
+# Email (SMTP)
+SMTP_ENABLED=$SMTP_ENABLED
+SMTP_HOST=$SMTP_HOST
+SMTP_PORT=$SMTP_PORT
+SMTP_USERNAME=$SMTP_USERNAME
+SMTP_PASSWORD=$SMTP_PASSWORD
+SMTP_FROM=$SMTP_FROM
+SMTP_TO=$SMTP_TO
+SMTP_TLS=$SMTP_TLS
+
+# Discord
+DISCORD_ENABLED=$DISCORD_ENABLED
+DISCORD_WEBHOOK_URL=$DISCORD_WEBHOOK_URL
+
+# Generic webhook
+WEBHOOK_ENABLED=$WEBHOOK_ENABLED
+WEBHOOK_URL=$WEBHOOK_URL
+WEBHOOK_HEADERS=$WEBHOOK_HEADERS
 EOF
 success "Generated .env"
 
