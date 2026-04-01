@@ -86,8 +86,11 @@ if is_haproxy_enabled; then
   echo "  Write: redis://${AUTH}localhost:${WRITE_PORT}"
   echo "  Read:  redis://${AUTH}localhost:${READ_PORT}"
   echo "  Stats: http://localhost:${HAPROXY_STATS_PORT:-8404}/stats"
+  echo ""
+  echo "  For external access, use the HAProxy endpoints above."
+  echo "  Direct node ports may fail due to Redis Cluster MOVED redirections."
 else
   echo "  redis://${AUTH}localhost:7001"
 fi
 echo ""
-echo "Run ./scripts/urls.sh for all internal/public/localhost URLs."
+echo "Run ./scripts/urls.sh for all connection URLs + firewall info."
