@@ -73,17 +73,21 @@ redis_exec redis-node-1 cluster nodes | awk '{
   printf "  %-10s %-25s %-20s %s\n", id, addr, flags, slots
 }'
 
-echo ""
+AUTH=""
 if [[ -n "${REDIS_PASSWORD:-}" ]]; then
-  echo "Host access: redis-cli -p 7001 -c -a \$REDIS_PASSWORD"
-else
-  echo "Host access: redis-cli -p 7001 -c"
+  AUTH=":${REDIS_PASSWORD}@"
 fi
 
+echo ""
+echo "Connection URLs:"
 if is_haproxy_enabled; then
-  echo ""
-  echo "Load Balancer:"
-  echo "  Write endpoint (masters): redis-cli -p ${HAPROXY_WRITE_PORT:-6380}"
-  echo "  Read endpoint (replicas): redis-cli -p ${HAPROXY_READ_PORT:-6381}"
-  echo "  Stats dashboard:          http://localhost:${HAPROXY_STATS_PORT:-8404}/stats"
+  WRITE_PORT="${HAPROXY_WRITE_PORT:-6380}"
+  READ_PORT="${HAPROXY_READ_PORT:-6381}"
+  echo "  Write: redis://${AUTH}localhost:${WRITE_PORT}"
+  echo "  Read:  redis://${AUTH}localhost:${READ_PORT}"
+  echo "  Stats: http://localhost:${HAPROXY_STATS_PORT:-8404}/stats"
+else
+  echo "  redis://${AUTH}localhost:7001"
 fi
+echo ""
+echo "Run ./scripts/urls.sh for all internal/public/localhost URLs."

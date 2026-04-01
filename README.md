@@ -90,6 +90,7 @@ redis-cli -p 6381 -a "$REDIS_PASSWORD"        # Read via load balancer
 | `./scripts/status.sh` | Cluster state, node roles, slots, memory, and LB health. |
 | `./scripts/scale-up.sh` | Add a master + replica pair. Rebalances slots. Updates HAProxy. |
 | `./scripts/scale-down.sh` | Remove last-added pair. Drains slots first. Updates HAProxy. |
+| `./scripts/urls.sh` | Show all Redis connection URLs (internal, public, localhost). |
 
 ## Authentication
 

@@ -510,16 +510,21 @@ if ask_yesno "Start the cluster now?" "Y"; then
   exec "$PROJECT_DIR/scripts/start.sh"
 else
   echo ""
+  AUTH=""
+  if [[ -n "$REDIS_PASSWORD" ]]; then
+    AUTH=":${REDIS_PASSWORD}@"
+  fi
+
   success "Setup complete! Start the cluster with:"
   echo ""
   echo -e "  ${BOLD}./scripts/start.sh${NC}"
   echo ""
-  if [[ -n "$REDIS_PASSWORD" ]]; then
-    echo -e "  Connect: ${DIM}redis-cli -p 7001 -c -a \"$REDIS_PASSWORD\"${NC}"
-  else
-    echo -e "  Connect: ${DIM}redis-cli -p 7001 -c${NC}"
-  fi
-  echo -e "  Status:  ${DIM}./scripts/status.sh${NC}"
-  echo -e "  Stats:   ${DIM}http://localhost:$HAPROXY_STATS_PORT/stats${NC}"
+  echo -e "  Connection URLs (after start):"
+  echo -e "    Write: ${DIM}redis://${AUTH}localhost:${HAPROXY_WRITE_PORT}${NC}"
+  echo -e "    Read:  ${DIM}redis://${AUTH}localhost:${HAPROXY_READ_PORT}${NC}"
+  echo -e "    Stats: ${DIM}http://localhost:${HAPROXY_STATS_PORT}/stats${NC}"
+  echo ""
+  echo -e "  ${DIM}./scripts/urls.sh${NC}    — Show all connection URLs"
+  echo -e "  ${DIM}./scripts/status.sh${NC}  — Cluster health"
   echo ""
 fi
