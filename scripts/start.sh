@@ -6,24 +6,27 @@ source "$SCRIPT_DIR/helpers.sh"
 
 print_header "Starting Redis HA Cluster"
 
-# Start all containers
-compose up -d
-
-# Collect node names from running containers
+# Collect expected node names
 NODES=()
 for i in $(seq 1 6); do
   NODES+=("redis-node-$i")
 done
 
 # Include scaled nodes if override exists
-if [[ -n "$OVERRIDE_FILE" ]]; then
-  highest=$(get_highest_node_number)
-  for i in $(seq 7 "$highest"); do
-    if docker ps --format "{{.Names}}" | grep -q "redis-node-$i"; then
-      NODES+=("redis-node-$i")
-    fi
+if [[ -n "$OVERRIDE_FILE" ]] && [[ -f "$OVERRIDE_FILE" ]]; then
+  scaled=$(grep "container_name:" "$OVERRIDE_FILE" 2>/dev/null | awk '{print $2}' || true)
+  for node in $scaled; do
+    NODES+=("$node")
   done
 fi
+
+# Generate HAProxy config before starting (HAProxy needs it at boot)
+if is_haproxy_enabled; then
+  generate_haproxy_config "${NODES[@]}"
+fi
+
+# Start all containers
+compose up -d
 
 wait_for_nodes "${NODES[@]}"
 
@@ -68,5 +71,14 @@ docker exec redis-node-1 redis-cli cluster nodes | awk '{
   for(i=9;i<=NF;i++) slots=slots" "$i;
   printf "  %-10s %-25s %-20s %s\n", id, addr, flags, slots
 }'
+
 echo ""
 echo "Host access: redis-cli -p 7001 -c"
+
+if is_haproxy_enabled; then
+  echo ""
+  echo "Load Balancer:"
+  echo "  Write endpoint (masters): redis-cli -p ${HAPROXY_WRITE_PORT:-6380}"
+  echo "  Read endpoint (replicas): redis-cli -p ${HAPROXY_READ_PORT:-6381}"
+  echo "  Stats dashboard:          http://localhost:${HAPROXY_STATS_PORT:-8404}/stats"
+fi

@@ -1,0 +1,25 @@
+services:
+  haproxy:
+    image: haproxy:lts-alpine
+    container_name: redis-haproxy
+    ports:
+      - "${HAPROXY_WRITE_PORT:-6380}:6380"
+      - "${HAPROXY_READ_PORT:-6381}:6381"
+      - "${HAPROXY_STATS_PORT:-8404}:8404"
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    networks:
+      - redis-cluster-net
+    depends_on:
+      redis-node-1:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "haproxy", "-c", "-f", "/usr/local/etc/haproxy/haproxy.cfg"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+networks:
+  redis-cluster-net:
+    external: false

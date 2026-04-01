@@ -1,0 +1,15 @@
+# Multi-server Redis Cluster configuration
+#
+# Format: server_ip  node_numbers (comma-separated)
+#
+# Place a master and a replica of a DIFFERENT master on each server
+# so that losing one server doesn't lose both copies of any data.
+#
+# Example: 3 servers, 6 nodes (3 masters + 3 replicas)
+# Redis assigns masters to the first 3 nodes, replicas to the last 3.
+# Nodes 1,2,3 = masters; Nodes 4,5,6 = replicas.
+# Node 4 replicates a different master than node 1, etc.
+
+192.168.1.10  1,4
+192.168.1.11  2,5
+192.168.1.12  3,6

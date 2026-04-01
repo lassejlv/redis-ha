@@ -1,0 +1,47 @@
+global
+    maxconn 4096
+    log stdout format raw local0
+
+defaults
+    mode tcp
+    timeout connect 5s
+    timeout client 30s
+    timeout server 30s
+    timeout check 3s
+    log global
+    option tcplog
+    option dontlognull
+
+frontend stats
+    mode http
+    bind *:8404
+    stats enable
+    stats uri /stats
+    stats refresh 5s
+    stats show-legends
+
+frontend ft_redis_write
+    bind *:6380
+    default_backend bk_redis_masters
+
+frontend ft_redis_read
+    bind *:6381
+    default_backend bk_redis_replicas
+
+backend bk_redis_masters
+    balance roundrobin
+    option tcp-check
+    tcp-check connect
+    tcp-check send "INFO replication\r\n"
+    tcp-check expect string role:master
+    tcp-check send "QUIT\r\n"
+# SERVER_LIST_MASTERS
+
+backend bk_redis_replicas
+    balance roundrobin
+    option tcp-check
+    tcp-check connect
+    tcp-check send "INFO replication\r\n"
+    tcp-check expect string role:slave
+    tcp-check send "QUIT\r\n"
+# SERVER_LIST_REPLICAS

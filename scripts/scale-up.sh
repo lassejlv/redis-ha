@@ -137,3 +137,11 @@ docker exec redis-node-1 redis-cli cluster nodes | awk '{
   slots=""; for(i=9;i<=NF;i++) slots=slots" "$i;
   printf "  %-10s %-25s %-20s %s\n", id, addr, flags, slots
 }'
+
+# Update HAProxy to include new nodes
+if is_haproxy_enabled; then
+  echo ""
+  echo "Updating HAProxy configuration..."
+  generate_haproxy_config
+  reload_haproxy
+fi

@@ -3,6 +3,13 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Load .env if present
+if [[ -f "$PROJECT_DIR/.env" ]]; then
+  set -a
+  source "$PROJECT_DIR/.env"
+  set +a
+fi
+
 # Auto-detect docker compose command
 if docker compose version &>/dev/null; then
   COMPOSE_CMD="docker compose"
@@ -10,17 +17,76 @@ else
   COMPOSE_CMD="docker-compose"
 fi
 
-compose() {
-  $COMPOSE_CMD -f "$PROJECT_DIR/docker-compose.yml" \
-    ${OVERRIDE_FILE:+-f "$OVERRIDE_FILE"} \
-    "$@"
-}
-
 # Set override file path if it exists
 OVERRIDE_FILE=""
 if [[ -f "$PROJECT_DIR/docker-compose.override.yml" ]]; then
   OVERRIDE_FILE="$PROJECT_DIR/docker-compose.override.yml"
 fi
+
+is_haproxy_enabled() {
+  [[ -f "$PROJECT_DIR/docker-compose.lb.yml" ]]
+}
+
+compose() {
+  local lb_flag=""
+  if is_haproxy_enabled; then
+    lb_flag="-f $PROJECT_DIR/docker-compose.lb.yml"
+  fi
+  $COMPOSE_CMD -f "$PROJECT_DIR/docker-compose.yml" \
+    ${OVERRIDE_FILE:+-f "$OVERRIDE_FILE"} \
+    $lb_flag \
+    "$@"
+}
+
+# Generate haproxy/haproxy.cfg from template.
+# Accepts optional node list; if empty, builds from base 6 + override.
+generate_haproxy_config() {
+  local template="$PROJECT_DIR/haproxy/haproxy.cfg.template"
+  local output="$PROJECT_DIR/haproxy/haproxy.cfg"
+  local nodes=("$@")
+
+  if [[ ! -f "$template" ]]; then
+    echo "WARNING: HAProxy template not found at $template"
+    return 1
+  fi
+
+  # Build node list if not provided
+  if [[ ${#nodes[@]} -eq 0 ]]; then
+    for i in $(seq 1 6); do
+      nodes+=("redis-node-$i")
+    done
+    # Add scaled nodes from override
+    if [[ -n "$OVERRIDE_FILE" ]] && [[ -f "$OVERRIDE_FILE" ]]; then
+      local scaled
+      scaled=$(grep "container_name:" "$OVERRIDE_FILE" 2>/dev/null | awk '{print $2}' || true)
+      for node in $scaled; do
+        nodes+=("$node")
+      done
+    fi
+  fi
+
+  # Build server lines
+  local server_lines=""
+  for node in "${nodes[@]}"; do
+    server_lines="${server_lines}    server ${node} ${node}:6379 check inter 2s fall 3 rise 2"$'\n'
+  done
+
+  # Replace placeholders in template
+  local config
+  config=$(cat "$template")
+  config="${config/# SERVER_LIST_MASTERS/$server_lines}"
+  config="${config/# SERVER_LIST_REPLICAS/$server_lines}"
+
+  echo "$config" > "$output"
+  echo "HAProxy config generated at $output"
+}
+
+reload_haproxy() {
+  if docker ps --format "{{.Names}}" | grep -q "redis-haproxy"; then
+    docker kill -s HUP redis-haproxy >/dev/null 2>&1
+    echo "HAProxy reloaded."
+  fi
+}
 
 wait_for_nodes() {
   local nodes=("$@")
@@ -67,6 +133,14 @@ get_highest_node_number() {
 get_master_count() {
   docker exec redis-node-1 redis-cli cluster nodes 2>/dev/null \
     | grep "master" | grep -v "fail" | wc -l | tr -d '[:space:]'
+}
+
+is_multi_server() {
+  [[ "${MULTI_SERVER:-false}" == "true" ]]
+}
+
+get_announce_ip() {
+  echo "${ANNOUNCE_IP:-}"
 }
 
 print_header() {

@@ -55,3 +55,26 @@ for node in $RUNNING; do
   printf "  %-20s %s\n" "$node" "$mem"
 done
 echo ""
+
+# Load Balancer status
+if is_haproxy_enabled && docker ps --format "{{.Names}}" | grep -q "redis-haproxy"; then
+  echo "--- Load Balancer (HAProxy) ---"
+  echo "  Write endpoint (masters): localhost:${HAPROXY_WRITE_PORT:-6380}"
+  echo "  Read endpoint (replicas): localhost:${HAPROXY_READ_PORT:-6381}"
+  echo "  Stats dashboard:          http://localhost:${HAPROXY_STATS_PORT:-8404}/stats"
+  echo ""
+
+  STATS_URL="http://localhost:${HAPROXY_STATS_PORT:-8404}/stats;csv"
+  if curl -sf "$STATS_URL" >/dev/null 2>&1; then
+    echo "  Backend health:"
+    echo "    Masters (write):"
+    curl -sf "$STATS_URL" 2>/dev/null \
+      | grep "bk_redis_masters" | grep "redis-node" \
+      | awk -F, '{printf "      %-20s %s\n", $2, $18}'
+    echo "    Replicas (read):"
+    curl -sf "$STATS_URL" 2>/dev/null \
+      | grep "bk_redis_replicas" | grep "redis-node" \
+      | awk -F, '{printf "      %-20s %s\n", $2, $18}'
+  fi
+  echo ""
+fi
