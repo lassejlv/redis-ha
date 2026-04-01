@@ -32,6 +32,7 @@ backend bk_redis_masters
     balance roundrobin
     option tcp-check
     tcp-check connect
+# AUTH_LINE
     tcp-check send "INFO replication\r\n"
     tcp-check expect string role:master
     tcp-check send "QUIT\r\n"
@@ -41,6 +42,7 @@ backend bk_redis_replicas
     balance roundrobin
     option tcp-check
     tcp-check connect
+# AUTH_LINE
     tcp-check send "INFO replication\r\n"
     tcp-check expect string role:slave
     tcp-check send "QUIT\r\n"

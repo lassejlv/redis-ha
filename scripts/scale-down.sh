@@ -39,8 +39,8 @@ if [[ -z "$MASTER_ID" || -z "$REPLICA_ID" ]]; then
 fi
 
 # Verify the master actually is a master by checking cluster nodes
-MASTER_FLAGS=$(docker exec redis-node-1 redis-cli cluster nodes | grep "$MASTER_ID" | awk '{print $3}')
-REPLICA_FLAGS=$(docker exec redis-node-1 redis-cli cluster nodes | grep "$REPLICA_ID" | awk '{print $3}')
+MASTER_FLAGS=$(redis_exec redis-node-1 cluster nodes | grep "$MASTER_ID" | awk '{print $3}')
+REPLICA_FLAGS=$(redis_exec redis-node-1 cluster nodes | grep "$REPLICA_ID" | awk '{print $3}')
 
 # If the "master" is actually a replica and vice versa, swap them
 if echo "$MASTER_FLAGS" | grep -q "slave" && echo "$REPLICA_FLAGS" | grep -q "master"; then
@@ -51,33 +51,37 @@ fi
 
 # Reshard: drain all slots from departing master
 echo "Draining hash slots from $MASTER_NAME..."
-docker exec redis-node-1 redis-cli --cluster rebalance \
+docker exec -e REDISCLI_AUTH="${REDIS_PASSWORD:-}" redis-node-1 \
+  redis-cli $(redis_cluster_auth) --cluster rebalance \
   redis-node-1:6379 --cluster-weight "$MASTER_ID"=0 --cluster-yes || true
 
 # Wait for resharding to complete
 sleep 3
 
 # Verify master has 0 slots
-REMAINING_SLOTS=$(docker exec redis-node-1 redis-cli cluster nodes \
+REMAINING_SLOTS=$(redis_exec redis-node-1 cluster nodes \
   | grep "$MASTER_ID" | awk '{for(i=9;i<=NF;i++) print $i}' | wc -l | tr -d '[:space:]')
 
 if [[ "$REMAINING_SLOTS" -gt 0 ]]; then
   echo "WARNING: Master still has $REMAINING_SLOTS slot ranges. Retrying rebalance..."
-  docker exec redis-node-1 redis-cli --cluster rebalance \
+  docker exec -e REDISCLI_AUTH="${REDIS_PASSWORD:-}" redis-node-1 \
+    redis-cli $(redis_cluster_auth) --cluster rebalance \
     redis-node-1:6379 --cluster-weight "$MASTER_ID"=0 --cluster-yes || true
   sleep 3
 fi
 
 # Remove replica first
 echo "Removing replica $REPLICA_NAME ($REPLICA_ID) from cluster..."
-docker exec redis-node-1 redis-cli --cluster del-node \
+docker exec -e REDISCLI_AUTH="${REDIS_PASSWORD:-}" redis-node-1 \
+  redis-cli $(redis_cluster_auth) --cluster del-node \
   redis-node-1:6379 "$REPLICA_ID"
 
 sleep 1
 
 # Remove master
 echo "Removing master $MASTER_NAME ($MASTER_ID) from cluster..."
-docker exec redis-node-1 redis-cli --cluster del-node \
+docker exec -e REDISCLI_AUTH="${REDIS_PASSWORD:-}" redis-node-1 \
+  redis-cli $(redis_cluster_auth) --cluster del-node \
   redis-node-1:6379 "$MASTER_ID"
 
 # Stop and remove containers
@@ -112,9 +116,9 @@ fi
 
 echo ""
 echo "Scale-down complete."
-docker exec redis-node-1 redis-cli cluster info | grep -E "cluster_state|cluster_slots|cluster_known_nodes|cluster_size"
+redis_exec redis-node-1 cluster info | grep -E "cluster_state|cluster_slots|cluster_known_nodes|cluster_size"
 echo ""
-docker exec redis-node-1 redis-cli cluster nodes | awk '{
+redis_exec redis-node-1 cluster nodes | awk '{
   id=substr($1,1,8); addr=$2; flags=$3;
   slots=""; for(i=9;i<=NF;i++) slots=slots" "$i;
   printf "  %-10s %-25s %-20s %s\n", id, addr, flags, slots

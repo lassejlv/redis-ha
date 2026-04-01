@@ -43,7 +43,8 @@ else
 
   # Retry up to 3 times
   for attempt in 1 2 3; do
-    if docker exec redis-node-1 redis-cli --cluster create \
+    if docker exec -e REDISCLI_AUTH="${REDIS_PASSWORD:-}" redis-node-1 \
+      redis-cli $(redis_cluster_auth) --cluster create \
       $NODE_ADDRS \
       --cluster-replicas 1 --cluster-yes; then
       echo "Cluster initialized successfully."
@@ -63,17 +64,21 @@ fi
 echo ""
 echo "Cluster is running. Verifying..."
 echo ""
-docker exec redis-node-1 redis-cli cluster info | grep -E "cluster_state|cluster_slots|cluster_known_nodes|cluster_size"
+redis_exec redis-node-1 cluster info | grep -E "cluster_state|cluster_slots|cluster_known_nodes|cluster_size"
 echo ""
 echo "Nodes:"
-docker exec redis-node-1 redis-cli cluster nodes | awk '{
+redis_exec redis-node-1 cluster nodes | awk '{
   id=substr($1,1,8); addr=$2; flags=$3; master=$4; slots="";
   for(i=9;i<=NF;i++) slots=slots" "$i;
   printf "  %-10s %-25s %-20s %s\n", id, addr, flags, slots
 }'
 
 echo ""
-echo "Host access: redis-cli -p 7001 -c"
+if [[ -n "${REDIS_PASSWORD:-}" ]]; then
+  echo "Host access: redis-cli -p 7001 -c -a \$REDIS_PASSWORD"
+else
+  echo "Host access: redis-cli -p 7001 -c"
+fi
 
 if is_haproxy_enabled; then
   echo ""

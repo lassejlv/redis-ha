@@ -90,7 +90,7 @@ fi
 
 # Initialize the cluster
 echo "Creating cluster..."
-redis-cli --cluster create $NODE_ADDRS --cluster-replicas 1 --cluster-yes
+redis-cli $(redis_cluster_auth) --cluster create $NODE_ADDRS --cluster-replicas 1 --cluster-yes
 
 echo ""
 echo "Cluster initialized."

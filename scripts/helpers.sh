@@ -10,6 +10,9 @@ if [[ -f "$PROJECT_DIR/.env" ]]; then
   set +a
 fi
 
+# Export for host-level redis-cli calls (e.g. multi-server-init.sh)
+export REDISCLI_AUTH="${REDIS_PASSWORD:-}"
+
 # Auto-detect docker compose command
 if docker compose version &>/dev/null; then
   COMPOSE_CMD="docker compose"
@@ -36,6 +39,26 @@ compose() {
     ${OVERRIDE_FILE:+-f "$OVERRIDE_FILE"} \
     $lb_flag \
     "$@"
+}
+
+# Execute redis-cli inside a container with auth if configured.
+# Usage: redis_exec <container> [redis-cli args...]
+redis_exec() {
+  local container="$1"
+  shift
+  local auth_env=()
+  if [[ -n "${REDIS_PASSWORD:-}" ]]; then
+    auth_env=(-e "REDISCLI_AUTH=$REDIS_PASSWORD")
+  fi
+  docker exec "${auth_env[@]}" "$container" redis-cli "$@"
+}
+
+# Returns auth flags for redis-cli --cluster commands.
+# These commands need explicit -a flag in addition to REDISCLI_AUTH.
+redis_cluster_auth() {
+  if [[ -n "${REDIS_PASSWORD:-}" ]]; then
+    echo "-a $REDIS_PASSWORD"
+  fi
 }
 
 # Generate haproxy/haproxy.cfg from template.
@@ -71,9 +94,17 @@ generate_haproxy_config() {
     server_lines="${server_lines}    server ${node} ${node}:6379 check inter 2s fall 3 rise 2"$'\n'
   done
 
+  # Build auth line for HAProxy tcp-check
+  local auth_line=""
+  if [[ -n "${REDIS_PASSWORD:-}" ]]; then
+    auth_line="    tcp-check send \"AUTH ${REDIS_PASSWORD}\r\n\""$'\n'"    tcp-check expect string +OK"
+  fi
+
   # Replace placeholders in template
   local config
   config=$(cat "$template")
+  config="${config/# AUTH_LINE/$auth_line}"
+  config="${config/# AUTH_LINE/$auth_line}"
   config="${config/# SERVER_LIST_MASTERS/$server_lines}"
   config="${config/# SERVER_LIST_REPLICAS/$server_lines}"
 
@@ -95,7 +126,7 @@ wait_for_nodes() {
 
   echo "Waiting for nodes to be ready..."
   for node in "${nodes[@]}"; do
-    while ! docker exec "$node" redis-cli ping &>/dev/null; do
+    while ! redis_exec "$node" ping &>/dev/null; do
       sleep 1
       elapsed=$((elapsed + 1))
       if [[ $elapsed -ge $timeout ]]; then
@@ -109,7 +140,7 @@ wait_for_nodes() {
 
 cluster_is_initialized() {
   local info
-  info=$(docker exec redis-node-1 redis-cli cluster info 2>/dev/null) || return 1
+  info=$(redis_exec redis-node-1 cluster info 2>/dev/null) || return 1
   local state known_nodes
   state=$(echo "$info" | grep "cluster_state" | tr -d '[:space:]')
   known_nodes=$(echo "$info" | grep "cluster_known_nodes" | cut -d: -f2 | tr -d '[:space:]')
@@ -119,7 +150,7 @@ cluster_is_initialized() {
 
 get_node_id() {
   local container="$1"
-  docker exec "$container" redis-cli cluster myid 2>/dev/null | tr -d '[:space:]'
+  redis_exec "$container" cluster myid 2>/dev/null | tr -d '[:space:]'
 }
 
 get_running_nodes() {
@@ -131,7 +162,7 @@ get_highest_node_number() {
 }
 
 get_master_count() {
-  docker exec redis-node-1 redis-cli cluster nodes 2>/dev/null \
+  redis_exec redis-node-1 cluster nodes 2>/dev/null \
     | grep "master" | grep -v "fail" | wc -l | tr -d '[:space:]'
 }
 

@@ -1,24 +1,49 @@
 # Redis HA Cluster
 
-A Docker-based Redis Cluster with High Availability. 3 masters + 3 replicas out of the box, with HAProxy load balancing and multi-server support.
+A Docker-based Redis Cluster with High Availability. 3 masters + 3 replicas out of the box, with HAProxy load balancing, authentication, and multi-server support.
 
-## Prerequisites
+## Setup
 
-- Docker and Docker Compose
-
-## Quick Start
+Run the interactive setup wizard:
 
 ```bash
-./scripts/start.sh       # Start cluster + HAProxy (auto-initializes on first run)
-./scripts/status.sh      # Check cluster health
+./setup.sh
+```
+
+This will:
+- Check and optionally install Docker
+- Ask for Redis version, password, node count, memory limits, and ports
+- Generate all configuration files
+- Optionally start the cluster
+
+**One-liner install** (curl):
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/lassejlv/redis-ha/main/setup.sh)
+```
+
+Or with git:
+
+```bash
+git clone https://github.com/lassejlv/redis-ha.git && cd redis-ha && ./setup.sh
+```
+
+## Quick Start (Manual)
+
+If you prefer to skip the wizard:
+
+```bash
+cp .env.example .env          # Edit .env with your settings
+./scripts/start.sh            # Start cluster + HAProxy
+./scripts/status.sh           # Check cluster health
 ```
 
 Connect from host:
 
 ```bash
-redis-cli -p 7001 -c              # Direct node access
-redis-cli -p 6380                  # Write via load balancer (masters)
-redis-cli -p 6381                  # Read via load balancer (replicas)
+redis-cli -p 7001 -c -a "$REDIS_PASSWORD"    # Direct node access
+redis-cli -p 6380 -a "$REDIS_PASSWORD"        # Write via load balancer
+redis-cli -p 6381 -a "$REDIS_PASSWORD"        # Read via load balancer
 ```
 
 ## Architecture
@@ -57,6 +82,7 @@ redis-cli -p 6381                  # Read via load balancer (replicas)
 
 | Script | Description |
 |---|---|
+| `./setup.sh` | Interactive setup wizard. Checks Docker, configures everything. |
 | `./scripts/start.sh` | Start all nodes + HAProxy. Initializes cluster on first run. |
 | `./scripts/stop.sh` | Graceful shutdown. Data volumes preserved. |
 | `./scripts/stop.sh --clean` | Stop and delete all data volumes (full reset). |
@@ -64,8 +90,17 @@ redis-cli -p 6381                  # Read via load balancer (replicas)
 | `./scripts/status.sh` | Cluster state, node roles, slots, memory, and LB health. |
 | `./scripts/scale-up.sh` | Add a master + replica pair. Rebalances slots. Updates HAProxy. |
 | `./scripts/scale-down.sh` | Remove last-added pair. Drains slots first. Updates HAProxy. |
-| `./scripts/generate-server-compose.sh` | Generate a compose file for one server (multi-server). |
-| `./scripts/multi-server-init.sh` | Initialize cluster across multiple servers. |
+
+## Authentication
+
+The setup wizard configures Redis authentication. When a password is set:
+
+- `redis.conf` gets `requirepass` + `masterauth` directives
+- All scripts authenticate automatically via `REDISCLI_AUTH` environment variable
+- HAProxy health checks authenticate via `AUTH` in the tcp-check sequence
+- Container health checks authenticate via the `REDISCLI_AUTH` env var
+
+Password is stored in `.env` (gitignored). The tracked `.env.example` has empty defaults.
 
 ## Load Balancer (HAProxy)
 
@@ -77,7 +112,7 @@ HAProxy provides single-endpoint access to the cluster:
 | Read | `6381` | Replicas only |
 | Stats | `8404` | HAProxy dashboard |
 
-Role detection uses `tcp-check` with `INFO replication` — no external scripts needed. On failover, HAProxy detects the role change within ~6 seconds.
+Role detection uses `tcp-check` with `INFO replication`. On failover, HAProxy detects the role change within ~6 seconds.
 
 Stats dashboard: http://localhost:8404/stats
 
@@ -139,8 +174,6 @@ From any machine with network access to all servers:
 ./scripts/multi-server-init.sh
 ```
 
-Each node advertises its host's external IP via `--cluster-announce-ip`, so cluster gossip works across servers. Bus ports (1700X) are mapped alongside client ports (700X).
-
 ## Failover Test
 
 ```bash
@@ -152,14 +185,16 @@ docker start redis-node-1       # Old master rejoins as replica
 
 ## Configuration
 
-Edit `.env`:
+Run `./setup.sh` to reconfigure, or edit `.env` directly:
 
 ```
 REDIS_VERSION=7.4                # Redis image version
+REDIS_PASSWORD=                  # Redis auth password
 CLUSTER_NODE_TIMEOUT=5000        # Failover detection (ms)
+REDIS_MAXMEMORY=                 # Per-node memory limit (e.g. 256mb)
 HAPROXY_WRITE_PORT=6380          # LB write endpoint
 HAPROXY_READ_PORT=6381           # LB read endpoint
 HAPROXY_STATS_PORT=8404          # LB stats dashboard
 ```
 
-Edit `redis.conf` for Redis settings. Changes take effect on next restart.
+After editing `.env`, regenerate `redis.conf` by running `./setup.sh` or restart with `./scripts/restart.sh`.

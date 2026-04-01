@@ -3,6 +3,8 @@ x-redis-node: &redis-node
   command: redis-server /usr/local/etc/redis/redis.conf
   networks:
     - redis-cluster-net
+  environment:
+    - REDISCLI_AUTH=${REDIS_PASSWORD:-}
   healthcheck:
     test: ["CMD", "redis-cli", "-p", "6379", "ping"]
     interval: 5s

@@ -49,6 +49,8 @@ cat >> "$OVERRIDE" <<EOF
       - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
     networks:
       - redis-cluster-net
+    environment:
+      - REDISCLI_AUTH=\${REDIS_PASSWORD:-}
     healthcheck:
       test: ["CMD", "redis-cli", "-p", "6379", "ping"]
       interval: 5s
@@ -68,6 +70,8 @@ cat >> "$OVERRIDE" <<EOF
       - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
     networks:
       - redis-cluster-net
+    environment:
+      - REDISCLI_AUTH=\${REDIS_PASSWORD:-}
     healthcheck:
       test: ["CMD", "redis-cli", "-p", "6379", "ping"]
       interval: 5s
@@ -107,7 +111,8 @@ wait_for_nodes "$MASTER_NAME" "$REPLICA_NAME"
 
 # Add master to cluster
 echo "Adding $MASTER_NAME as master..."
-docker exec redis-node-1 redis-cli --cluster add-node \
+docker exec -e REDISCLI_AUTH="${REDIS_PASSWORD:-}" redis-node-1 \
+  redis-cli $(redis_cluster_auth) --cluster add-node \
   "$MASTER_NAME:6379" redis-node-1:6379
 
 # Wait for node to be recognized
@@ -116,7 +121,8 @@ sleep 2
 # Add replica linked to the new master
 MASTER_ID=$(get_node_id "$MASTER_NAME")
 echo "Adding $REPLICA_NAME as replica of $MASTER_NAME ($MASTER_ID)..."
-docker exec redis-node-1 redis-cli --cluster add-node \
+docker exec -e REDISCLI_AUTH="${REDIS_PASSWORD:-}" redis-node-1 \
+  redis-cli $(redis_cluster_auth) --cluster add-node \
   "$REPLICA_NAME:6379" redis-node-1:6379 \
   --cluster-slave --cluster-master-id "$MASTER_ID"
 
@@ -125,14 +131,15 @@ sleep 2
 # Rebalance slots across all masters
 echo ""
 echo "Rebalancing hash slots across all masters..."
-docker exec redis-node-1 redis-cli --cluster rebalance \
+docker exec -e REDISCLI_AUTH="${REDIS_PASSWORD:-}" redis-node-1 \
+  redis-cli $(redis_cluster_auth) --cluster rebalance \
   redis-node-1:6379 --cluster-use-empty-masters --cluster-yes || true
 
 echo ""
 echo "Scale-up complete."
-docker exec redis-node-1 redis-cli cluster info | grep -E "cluster_state|cluster_slots|cluster_known_nodes|cluster_size"
+redis_exec redis-node-1 cluster info | grep -E "cluster_state|cluster_slots|cluster_known_nodes|cluster_size"
 echo ""
-docker exec redis-node-1 redis-cli cluster nodes | awk '{
+redis_exec redis-node-1 cluster nodes | awk '{
   id=substr($1,1,8); addr=$2; flags=$3;
   slots=""; for(i=9;i<=NF;i++) slots=slots" "$i;
   printf "  %-10s %-25s %-20s %s\n", id, addr, flags, slots

@@ -44,6 +44,8 @@ x-redis-node: &redis-node
   image: redis:${REDIS_VERSION:-7.4}
   networks:
     - redis-cluster-net
+  environment:
+    - REDISCLI_AUTH=${REDIS_PASSWORD:-}
   healthcheck:
     test: ["CMD", "redis-cli", "-p", "6379", "ping"]
     interval: 5s
