@@ -1,0 +1,79 @@
+x-redis-node: &redis-node
+  image: redis:${REDIS_VERSION:-7.4}
+  command: redis-server /usr/local/etc/redis/redis.conf
+  networks:
+    - redis-cluster-net
+  healthcheck:
+    test: ["CMD", "redis-cli", "-p", "6379", "ping"]
+    interval: 5s
+    timeout: 3s
+    retries: 5
+    start_period: 10s
+  restart: unless-stopped
+
+services:
+  redis-node-1:
+    <<: *redis-node
+    container_name: redis-node-1
+    ports:
+      - "7001:6379"
+    volumes:
+      - redis-data-1:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
+
+  redis-node-2:
+    <<: *redis-node
+    container_name: redis-node-2
+    ports:
+      - "7002:6379"
+    volumes:
+      - redis-data-2:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
+
+  redis-node-3:
+    <<: *redis-node
+    container_name: redis-node-3
+    ports:
+      - "7003:6379"
+    volumes:
+      - redis-data-3:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
+
+  redis-node-4:
+    <<: *redis-node
+    container_name: redis-node-4
+    ports:
+      - "7004:6379"
+    volumes:
+      - redis-data-4:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
+
+  redis-node-5:
+    <<: *redis-node
+    container_name: redis-node-5
+    ports:
+      - "7005:6379"
+    volumes:
+      - redis-data-5:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
+
+  redis-node-6:
+    <<: *redis-node
+    container_name: redis-node-6
+    ports:
+      - "7006:6379"
+    volumes:
+      - redis-data-6:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
+
+volumes:
+  redis-data-1:
+  redis-data-2:
+  redis-data-3:
+  redis-data-4:
+  redis-data-5:
+  redis-data-6:
+
+networks:
+  redis-cluster-net:
+    driver: bridge
