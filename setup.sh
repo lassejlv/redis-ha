@@ -149,11 +149,26 @@ echo ""
 # ─── Standalone installer: clone if not in repo ──────────
 
 if [[ ! -f "./docker-compose.yml" ]] && [[ ! -f "./scripts/helpers.sh" ]]; then
-  info "Not inside the redis-ha project. Cloning..."
+  # Install git if missing
   if ! command -v git &>/dev/null; then
-    error "git is not installed. Please install git first."
-    exit 1
+    info "Installing git..."
+    if command -v apt-get &>/dev/null; then
+      sudo apt-get update -qq && sudo apt-get install -y -qq git >/dev/null 2>&1
+    elif command -v dnf &>/dev/null; then
+      sudo dnf install -y --quiet git >/dev/null 2>&1
+    elif command -v yum &>/dev/null; then
+      sudo yum install -y --quiet git >/dev/null 2>&1
+    elif command -v apk &>/dev/null; then
+      apk add --quiet git >/dev/null 2>&1
+    elif command -v brew &>/dev/null; then
+      brew install git >/dev/null 2>&1
+    else
+      error "Could not install git. Please install it manually."
+      exit 1
+    fi
+    success "git installed"
   fi
+  info "Not inside the redis-ha project. Cloning..."
   git clone --quiet "$REPO_URL" redis-ha
   success "Repository cloned into ./redis-ha"
   echo ""
