@@ -14,7 +14,7 @@ fi
 
 # Detect host IP for public URLs
 # Try public IP first (for cloud VMs), then private, then fallback
-PUBLIC_IP=$(curl -sf --max-time 2 ifconfig.me 2>/dev/null || true)
+PUBLIC_IP=$(curl -4sf --max-time 2 ifconfig.me 2>/dev/null || true)
 PRIVATE_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
 if [[ -z "$PRIVATE_IP" ]]; then
   PRIVATE_IP=$(ifconfig 2>/dev/null | grep 'inet ' | grep -v '127.0.0.1' | head -1 | awk '{print $2}' || true)
